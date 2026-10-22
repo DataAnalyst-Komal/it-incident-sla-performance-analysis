@@ -99,7 +99,7 @@ Critical Incidents- 320
 
 ## Dashboard Preview
 
-![dashboard](https://github.com/DataAnalyst-Komal/it-incident-sla-dashboard/blob/main/snapshot-it-incident-sla-dashboard.PNG)
+![dashboard](https://github.com/DataAnalyst-Komal/it-incident-sla-performance-analysis/blob/main/snapshot-it-incident-sla-dashboard.PNG)
 
 ## Learnings
 
