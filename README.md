@@ -1,119 +1,150 @@
-## IT Incident & SLA Performance Dashboard
+# IT Incident & SLA Performance Dashboard
 
-This project analyzes IT incident data and SLA performance to identify operational inefficiencies and improvement opportunities. Built entirely as a self-initiated portfolio project using a Kaggle dataset, it applies 5 years of IT Service Management experience through a data analytics lens.
+A Power BI dashboard that analyzes 1,200 IT incidents to show where SLA targets are being missed. This is a self-initiated portfolio project that applies 5+ years of IT Service Management experience through a data analytics lens.
 
-## Objective
+![Dashboard preview](snapshot-it-incident-sla-dashboard.PNG)
 
-To understand incident patterns, identify root causes, and evaluate SLA performance across departments, priorities, and locations — translating operational knowledge into KPI-driven insights that leadership can act on.
-
-## Tech Stack
-
-Power BI — Dashboard design, data visualization & interactive reporting
-
-Power Query — Data cleaning & transformation
-
-DAX — Calculated columns & measures
+## Business Question
+Which incidents breach their SLA and how do breaches vary by priority, department, location, incident type and month?
 
 ## Dataset
+- Source: [Kaggle - it_incident_dataset]([ADD KAGGLE LINK](https://www.kaggle.com/datasets/laraibjutt/it-incident-dataset/data)), also included here as 'it_incident_dataset.csv'
+- 1,200 incidents reported between January and November 2024 (972 Resolved, 228 Closed)
+- **Data note:** average resolution time is almost identical for every priority (about 35-38 hours) and every incident resolves within 1-72 hours. A real operation would resolve Critical incidents much faster, so the dataset appears to be synthetic. The findings below demonstrate my analysis method, not conclusions about a real company.
 
-Source: Kaggle (publicly available IT incident dataset)
+## Tools
+Power BI, Power Query, DAX
 
-## KPI
+## SLA Definition
+Each priority has a resolution target in `Dim_Priority`. An incident **breaches** its SLA when it is resolved **after** the target. An incident resolved exactly at the target counts as met (11 incidents fall exactly on their target).
 
-Total Incidents- 1,200 
+| Priority | Target |
+| --- | --- |
+| Critical | 4 hrs |
+| High | 8 hrs |
+| Medium | 48 hrs |
+| Low | 120 hrs |
 
-Breached Incidents- 873
+## Data Model
+Star schema: one fact table, five dimension tables and a calendar table.
 
-SLA Breached %- 72.75%
+![Data model](data-model.png)
 
-Critical Incidents- 320
+| Fact column | Dimension / Calendar | Relationship |
+| --- | --- | --- |
+| Priority | Dim_Priority | many-to-one |
+| Assigned Department | Dim_Department | many-to-one |
+| Location | Dim_Location | many-to-one |
+| Incident Type | Dim_IncidentType | many-to-one |
+| Resolution Type | Dim_ResolutionType | many-to-one |
+| Reported Date | Calendar[Date] | many-to-one (active) |
+| Resolved Date | Calendar[Date] | many-to-one (inactive) |
 
-## Key Insights
+The duplicate text columns in the fact table are hidden, so report visuals use the dimension columns.
 
--72.75% overall SLA breach rate — indicates significant performance gaps in incident resolution efficiency.
+## Data Preparation (Power Query)
+1. Loaded the CSV from this repository and set data types.
+2. Renamed columns to readable names (`Incident_ID` to `Incident ID`).
+3. Added `Reported Date` and `Resolved Date` from the timestamp columns.
+4. Built dimension tables by selecting one column and removing duplicates.
+5. Built `Dim_Priority` with an SLA target and a sort order per priority:
 
--Critical incidents breach SLA at 95.88% — averaging ~35 hrs against a 1–4 hr target, nearly 9x over SLA.
+```powerquery
+#"Added SLA Threshold" = Table.AddColumn(#"Removed Duplicates", "SLA_Threshold_Hours",
+    each if [Priority] = "Critical" then 4
+    else if [Priority] = "High" then 8
+    else if [Priority] = "Medium" then 48
+    else if [Priority] = "Low" then 120
+    else null, Int64.Type)
+```
+6. Built a calendar table covering 1 Jan to 30 Nov 2024, the range of the data.
 
--High priority at 89.20% breach rate — against a 4–8 hr target, still significantly over acceptable thresholds
+## DAX
+**SLA status** (calculated column in the fact table):
+```DAX
+SLA Status =
+VAR Threshold = RELATED(Dim_Priority[SLA_Threshold_Hours])
+RETURN IF(Fact_incident_dataset[Resolution Time Hours] > Threshold, "Breached", "Within SLA")
+```
 
--IT Support handles the highest volume (268) and highest SLA breach rate (74.63%)
+**Measures** (kept in a dedicated measures table). `COALESCE` returns 0 instead of blank when nothing matches, so categories with no breaches (like Low priority) still appear in charts and cards.
+```DAX
+Total Incidents = COUNTROWS(Fact_incident_dataset)
 
--Security & Server issues drive the majority of High (324) and Critical (320) priority incidents
+Breached Incidents =
+COALESCE(
+    CALCULATE([Total Incidents], Fact_incident_dataset[SLA Status] = "Breached"),
+    0
+)
 
--Medium & Low priority incidents remain comfortably within SLA.
+SLA Breach % = DIVIDE(COALESCE([Breached Incidents], 0), [Total Incidents])
 
--October–November shows peak SLA breaches, indicating possible seasonal operational strain
+Critical Incidents =
+COALESCE(
+    CALCULATE([Total Incidents], Fact_incident_dataset[Priority] = "Critical"),
+    0
+)
 
--Remote Site 1 reports the highest number of incidents (276)
+Avg Resolution Time (Hrs) = AVERAGE(Fact_incident_dataset[Resolution Time Hours])
+```
 
-** Not all SLA breaches are avoidable — major outages, resource constraints, and unforeseen incidents are unavoidable operational realities. However, a 95.88% Critical breach rate signals a systemic escalation gap beyond acceptable thresholds.**
+## KPIs
+| Metric | Value |
+| --- | --- |
+| Total incidents | 1,200 |
+| Breached incidents | 702 |
+| SLA breach % | 58.50% |
+| Critical incidents | 320 |
 
 ## SLA Performance by Priority
+| Priority | Incidents | Target | Avg Resolution | Breach % |
+| --- | --- | --- | --- | --- |
+| Critical | 320 | 4 hrs | 35.2 hrs | 94.69% |
+| High | 324 | 8 hrs | 34.6 hrs | 88.89% |
+| Medium | 290 | 48 hrs | 38.3 hrs | 38.28% |
+| Low | 266 | 120 hrs | 36.1 hrs | 0.00% |
 
-| Priority | Avg Resolution | SLA Target | Status |
-|----------|---------------|------------|--------|
-| Critical | 34.6 hrs | 1–4 hours | Breaching ~9x |
-| High | 35.2 hrs | 4–8 hours | Breaching ~5x |
-| Medium | 38.3 hrs | 24–48 hours | Within SLA |
-| Low | 36.1 hrs | 3–5 days | Within SLA |
+Low never breaches only because its 120-hour target is above the 72-hour maximum in the data.
+
+## Key Findings
+- **58.5%** of incidents (702 of 1,200) breached their SLA.
+- **Critical (94.7%) and High (88.9%)** incidents breach most. Medium breaches 38.3%.
+- **Resolution time is almost the same for every priority** (about 35-38 hrs), so urgent incidents are not being resolved faster.
+- **Security Team** has the highest breach rate (62.6%) and **Network Team** the lowest (54.9%). The spread across departments is only about 8 points, so it should not be over-read.
+- **IT Support** has the most incidents (268) and the slowest average resolution (39.1 hrs).
+- **Breach rate peaks in July (69.0%)** and is lowest in May (49.0%).
+- **Remote Site 1** has the most incidents (276).
+- Security Breach (252) and Server Crash (247) are the most common incident types.
 
 ## Dashboard Features
-
--SLA compliance tracking across departments, priorities and locations
-
--Incident trend analysis over time (monthly & quarterly)
-
--Priority-wise breakdown of incidents and SLA breach %
-
--Department-wise performance comparison
-
--Root cause analysis via treemap visualization
-
--Interactive filters — SLA Status, Priority, Month, Quarter, Root Cause
+- KPI cards for total, breached and critical incidents and breach %
+- Breakdowns by department, priority, location and incident type
+- Monthly SLA breach trend
+- Slicers for SLA status, priority, month, quarter and incident type, plus a Clear All Filters button
+- The SLA Status slicer filters the breakdown charts, while the KPI cards and the breach % charts stay at the overall values
 
 ## Recommendations
+If these patterns held in real data, I would:
+- Create a fast-track queue for Critical and High incidents and review why they are resolved no faster than Low ones.
+- Alert team leads when a Critical incident passes 2 hours without an update.
+- Review the Medium SLA target, since 38% of Medium incidents breach.
+- Investigate July, the peak month, for staffing or change-related causes.
+- Check workload and resolution time in IT Support, which has the highest volume and the slowest average.
 
--Implement a dedicated P1/P2 escalation queue — separate Critical & High incidents into a fast-track resolution workflow with dedicated resources.
+## Limitations
+- The data appears synthetic, so no real-world conclusion can be drawn.
+- The dataset covers January to November 2024 only, so Q4 is incomplete and seasonality can't be confirmed.
+- Months are counted by the date an incident was reported; 54 incidents were resolved in a later month.
+- Counting incidents exactly at their target as breached would raise breaches from 702 to 713.
+- There is no staffing, shift or change-calendar data, so causes of breaches are hypotheses.
 
--Set up automated SLA breach alerts — triggers notifications when Critical incidents exceed 2 hrs without resolution updates.
+## How to Open
+Download `it_incident_sla_dashboard.pbix` and open it in Power BI Desktop. To refresh the data, the dataset file must stay in this repository.
 
--Investigate October–November spike — assess whether staffing levels, change freeze periods, or seasonal factors contribute to the breach peak.
+## What I Learned
+- Building a star schema with a dedicated measures table and a calendar.
+- Working with SLA logic in DAX, handling blanks versus zeros and checking my results by recalculating them independently from the raw data.
+- Telling the difference between what happened and why it might have happened.
 
--Review IT Support workload distribution — highest volume AND highest breach rate suggests understaffing or skill gap.
-
--Introduce real-time SLA dashboards for team leads — visibility into live breach risk enables proactive intervention before SLA is missed.
-
--Root cause focus on Security & Server — targeted preventive measures for top incident drivers could significantly reduce High/Critical volumes.
-
-## Business Impact
-
--Identifies P1/P2 escalation gaps where Critical incidents average ~9x over SLA target
-
--Supports prioritization of high-risk incident categories (Security & Server)
-
--Improves visibility into SLA performance across teams and locations
-
--Enables better resource allocation by distinguishing escalation problems from capacity problems
-
--Provides seasonal trend insight for proactive operational planning
-
-## Dashboard Preview
-
-![dashboard](https://github.com/DataAnalyst-Komal/it-incident-sla-performance-analysis/blob/main/snapshot-it-incident-sla-dashboard.PNG)
-
-## Learnings
-
-Gained hands-on experience with ITSM data and incident lifecycle analysis
-
-Built calculated columns and measures using DAX for SLA performance tracking
-
-Developed understanding of SLA tier structures (P1–P4) and their operational implications
-
-Improved dashboard design and data storytelling skills
-
-Strengthened ability to translate operational data into actionable business insights
-
-Learned to distinguish between descriptive analytics (what happened) and diagnostic analytics (why it happened)
-
-
-Built with Power BI | Power Query | DAX • Dataset: Kaggle • Portfolio Project
+---
+Built with Power BI | Power Query | DAX
